@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Download, CheckCircle, AlertTriangle, AlertCircle,
     TrendingUp, Eye, Sparkles, BarChart3, FileText, Target,
@@ -7,10 +6,13 @@ import {
 } from 'lucide-react';
 
 export default function ReportPage({ analysis, curriculum, onBack, onNavigateToComparison }) {
-    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('overview');
 
     if (!analysis) return null;
+
+    const openDownload = (path) => {
+        window.location.href = `${window.location.origin}${path}`;
+    };
 
     const {
         overall_score = 0,
@@ -30,6 +32,7 @@ export default function ReportPage({ analysis, curriculum, onBack, onNavigateToC
     } = analysis;
 
     const reportSummary = full_report?.report_summary || {};
+    const benchmarkComparison = full_report?.benchmark_comparison || {};
 
     const scoreColor = overall_score >= 75 ? '#10B981' : overall_score >= 50 ? '#F59E0B' : '#EF4444';
     const statusColor = report_status === 'Good' ? '#10B981' : report_status === 'Fair' ? '#F59E0B' : '#EF4444';
@@ -176,6 +179,52 @@ export default function ReportPage({ analysis, curriculum, onBack, onNavigateToC
                 </div>
             </div>
 
+            {/* Benchmark Comparison */}
+            {benchmarkComparison.benchmark_found && (
+                <div style={styles.section}>
+                    <h3 style={styles.sectionTitle}>
+                        <Target size={18} style={{ marginRight: 8, color: '#2563EB' }} />
+                        Stream Benchmark Comparison
+                    </h3>
+                    <div style={styles.twoColumnRow}>
+                        <div style={styles.summaryCard}>
+                            <p style={styles.metricLabel}>Benchmark Used</p>
+                            <h4 style={styles.suggestionTitle}>
+                                {benchmarkComparison.stream_name} ({benchmarkComparison.updated_year})
+                            </h4>
+                            <p style={styles.metricDescription}>
+                                Match: {benchmarkComparison.match_percentage}% of benchmark topics, tools, and skills found in uploaded curriculum.
+                            </p>
+                            <p style={styles.metricDescription}>
+                                Source: {benchmarkComparison.source_status || 'cached'}{benchmarkComparison.fetched_at ? ` • refreshed ${new Date(benchmarkComparison.fetched_at).toLocaleString()}` : ''}
+                            </p>
+                            <div style={styles.tagContainer}>
+                                {(benchmarkComparison.matched_topics || []).slice(0, 8).map((topic, i) => (
+                                    <span key={i} style={styles.tag}>{topic}</span>
+                                ))}
+                            </div>
+                        </div>
+                        <div style={styles.summaryCard}>
+                            <p style={styles.metricLabel}>Missing Benchmark Items</p>
+                            <div style={styles.cardBody}>
+                                {(benchmarkComparison.missing_topics || []).slice(0, 6).map((topic, i) => (
+                                    <div key={i} style={styles.listItem}>
+                                        <AlertTriangle size={16} color="#F59E0B" style={{ flexShrink: 0, marginTop: 2 }} />
+                                        <span style={styles.listText}>{topic}</span>
+                                    </div>
+                                ))}
+                                {(benchmarkComparison.missing_tools || []).slice(0, 4).map((tool, i) => (
+                                    <div key={`tool-${i}`} style={styles.listItem}>
+                                        <AlertCircle size={16} color="#EF4444" style={{ flexShrink: 0, marginTop: 2 }} />
+                                        <span style={styles.listText}>{tool}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* What's Good & Needs Improvement */}
             <div style={styles.twoColumnRow}>
                 {/* What's Good */}
@@ -314,7 +363,7 @@ export default function ReportPage({ analysis, curriculum, onBack, onNavigateToC
 
             {/* Action Buttons */}
             <div style={styles.actionButtons}>
-                <button style={styles.outlineButton} onClick={() => window.open(`${window.location.origin}/api/download/${analysis.id}/`, '_blank')}>
+                <button style={styles.outlineButton} onClick={() => openDownload(`/api/download/${analysis.id}/`)}>
                     <Download size={16} />
                     Download XLS
                 </button>
@@ -322,9 +371,9 @@ export default function ReportPage({ analysis, curriculum, onBack, onNavigateToC
                     <TrendingUp size={16} />
                     View Comparison
                 </button>
-                <button style={styles.primaryButton}>
+                <button style={styles.primaryButton} onClick={() => openDownload(`/api/download-improvements/${analysis.id}/`)}>
                     <Sparkles size={16} />
-                    Apply AI Improvements
+                    Download AI Improvement Plan
                 </button>
             </div>
 

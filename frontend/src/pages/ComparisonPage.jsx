@@ -14,6 +14,10 @@ export default function ComparisonPage({ analysis, onBack }) {
 
     if (!analysis) return null;
 
+    const downloadComparison = () => {
+        window.location.href = `${window.location.origin}/api/download-comparison/${analysis.id}/`;
+    };
+
     const {
         overall_score = 0,
         previous_score = 0,
@@ -69,9 +73,9 @@ export default function ComparisonPage({ analysis, onBack }) {
                         <p style={styles.headerSubtitle}>Compare current analysis with previous report</p>
                     </div>
                 </div>
-                <button style={styles.downloadBtn}>
+                <button style={styles.downloadBtn} onClick={downloadComparison}>
                     <Download size={16} />
-                    Download Graphs
+                    Download Comparison
                 </button>
             </div>
 

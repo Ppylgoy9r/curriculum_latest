@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from django.http import JsonResponse
 from django.views import View
 from django.utils.decorators import method_decorator
@@ -8,12 +9,13 @@ from django.core.files.storage import default_storage
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Batch, Curriculum, Analysis
+from .models import Batch, Curriculum, StreamBenchmark, Analysis
 from .serializers import (
     BatchSerializer, CurriculumSerializer, CurriculumUploadSerializer,
-    AnalysisSerializer, AnalysisSummarySerializer
+    StreamBenchmarkSerializer, AnalysisSerializer, AnalysisSummarySerializer
 )
 from .ai_analyzer import parse_xlsx, analyze_curriculum_with_ai
+from .benchmark_service import refresh_live_benchmark
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -156,6 +158,15 @@ class CurriculumListView(APIView):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
+class StreamBenchmarkListView(APIView):
+    """List stream benchmark records used for curriculum comparison."""
+    def get(self, request):
+        benchmarks = StreamBenchmark.objects.all()
+        serializer = StreamBenchmarkSerializer(benchmarks, many=True)
+        return Response(serializer.data)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class AnalyzeCurriculumView(APIView):
     """Analyze a curriculum using AI."""
     def post(self, request, curriculum_id):
@@ -176,8 +187,12 @@ class AnalyzeCurriculumView(APIView):
                     parts.append(f"{week}: {data.get('raw_text', '')}")
             curriculum_text = '\n'.join(parts)
 
+        benchmark = select_stream_benchmark(curriculum_text)
+        benchmark = refresh_live_benchmark(benchmark) if benchmark else None
+        benchmark_data = StreamBenchmarkSerializer(benchmark).data if benchmark else None
+
         # Perform AI analysis
-        analysis_data = analyze_curriculum_with_ai(curriculum.weeks_data, curriculum_text)
+        analysis_data = analyze_curriculum_with_ai(curriculum.weeks_data, curriculum_text, benchmark_data)
 
         # Update report summary with actual counts
         total_weeks = len(curriculum.weeks_data) if curriculum.weeks_data else 0
@@ -211,6 +226,44 @@ class AnalyzeCurriculumView(APIView):
 
         serializer = AnalysisSummarySerializer(analysis)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+def select_stream_benchmark(curriculum_text):
+    """Select the closest benchmark by stream name and benchmark item overlap."""
+    benchmarks = StreamBenchmark.objects.all()
+    if not benchmarks:
+        return None
+
+    normalized_text = normalize_text(curriculum_text)
+    best_benchmark = None
+    best_score = -1
+
+    for benchmark in benchmarks:
+        score = 0
+        stream_tokens = normalize_text(benchmark.stream_name).split()
+        if all(token in normalized_text for token in stream_tokens):
+            score += 10
+
+        all_items = (
+            benchmark.benchmark_topics +
+            benchmark.required_tools +
+            benchmark.industry_skills +
+            benchmark.expected_outcomes
+        )
+        for item in all_items:
+            item_tokens = [token for token in normalize_text(item).split() if len(token) > 2]
+            if item_tokens and sum(1 for token in item_tokens if token in normalized_text) / len(item_tokens) >= 0.6:
+                score += 1
+
+        if score > best_score:
+            best_score = score
+            best_benchmark = benchmark
+
+    return best_benchmark
+
+
+def normalize_text(value):
+    return re.sub(r'[^a-z0-9+#.]+', ' ', str(value).lower()).strip()
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -331,18 +384,7 @@ class DownloadAnalysisView(View):
                 for col in ['A', 'B', 'C']:
                     ws4[f'{col}{i}'].border = border
 
-            # Adjust column widths
-            for ws in [ws1, ws2, ws3, ws4]:
-                for col in ws.columns:
-                    max_length = 0
-                    column = col[0].column_letter
-                    for cell in col:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    ws.column_dimensions[column].width = min(max_length + 4, 50)
+            adjust_column_widths([ws1, ws2, ws3, ws4])
 
             # Save to response
             from django.http import HttpResponse
@@ -355,3 +397,137 @@ class DownloadAnalysisView(View):
 
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DownloadImprovementPlanView(View):
+    """Download an AI improvement action plan as XLSX."""
+    def get(self, request, analysis_id):
+        try:
+            analysis = Analysis.objects.get(pk=analysis_id)
+        except Analysis.DoesNotExist:
+            return JsonResponse({'error': 'Analysis not found'}, status=404)
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill
+            from django.http import HttpResponse
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Improvement Plan"
+            header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+
+            ws['A1'] = "AI Improvement Plan"
+            ws['A1'].font = Font(bold=True, size=18, color="2563EB")
+            ws.append([])
+            ws.append(["Curriculum", analysis.curriculum.file_name])
+            ws.append(["Detected Topic", analysis.detected_topic])
+            ws.append(["Current Score", analysis.overall_score])
+            ws.append([])
+
+            ws.append(["Priority", "Improvement", "Recommended Action"])
+            for cell in ws[6]:
+                cell.font = header_font
+                cell.fill = header_fill
+
+            for suggestion in analysis.ai_suggestions:
+                ws.append([
+                    suggestion.get('priority', ''),
+                    suggestion.get('title', ''),
+                    suggestion.get('description', ''),
+                ])
+
+            ws.append([])
+            ws.append(["Quick Fix", "Description"])
+            quick_fix_header_row = ws.max_row
+            for cell in ws[quick_fix_header_row]:
+                cell.font = header_font
+                cell.fill = header_fill
+
+            for fix in analysis.quick_fixes:
+                ws.append([fix.get('title', ''), fix.get('description', '')])
+
+            adjust_column_widths([ws])
+
+            response = HttpResponse(
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = 'attachment; filename="ai_improvement_plan.xlsx"'
+            wb.save(response)
+            return response
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DownloadComparisonView(View):
+    """Download comparison data as XLSX."""
+    def get(self, request, analysis_id):
+        try:
+            analysis = Analysis.objects.get(pk=analysis_id)
+        except Analysis.DoesNotExist:
+            return JsonResponse({'error': 'Analysis not found'}, status=404)
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill
+            from django.http import HttpResponse
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Comparison"
+            header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+
+            ws.append(["Metric", "Current", "Previous", "Change"])
+            for cell in ws[1]:
+                cell.font = header_font
+                cell.fill = header_fill
+
+            ws.append([
+                "Overall Score",
+                analysis.overall_score,
+                analysis.previous_score,
+                analysis.overall_score - analysis.previous_score,
+            ])
+            ws.append(["Performance Change", f"{analysis.performance_change}%", "", ""])
+            ws.append(["Categories Improved", analysis.categories_improved, analysis.categories_total, ""])
+            ws.append([])
+            ws.append(["Category", "Current Score"])
+            for cell in ws[6]:
+                cell.font = header_font
+                cell.fill = header_fill
+
+            for category, score in analysis.category_scores.items():
+                ws.append([category, score])
+
+            adjust_column_widths([ws])
+
+            response = HttpResponse(
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = 'attachment; filename="comparison_report.xlsx"'
+            wb.save(response)
+            return response
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+
+
+def adjust_column_widths(worksheets):
+    """Autosize worksheets while ignoring merged cells."""
+    for ws in worksheets:
+        for col in ws.iter_cols():
+            max_length = 0
+            column_letter = None
+            for cell in col:
+                if not column_letter and hasattr(cell, 'column_letter'):
+                    column_letter = cell.column_letter
+                try:
+                    value = '' if cell.value is None else str(cell.value)
+                    max_length = max(max_length, len(value))
+                except Exception:
+                    pass
+            if column_letter:
+                ws.column_dimensions[column_letter].width = min(max_length + 4, 60)

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Batch, Curriculum, Analysis
+from .models import Batch, Curriculum, StreamBenchmark, Analysis
 
 
 @admin.register(Batch)
@@ -12,6 +12,12 @@ class BatchAdmin(admin.ModelAdmin):
 class CurriculumAdmin(admin.ModelAdmin):
     list_display = ['file_name', 'file_size', 'batch', 'uploaded_at']
     search_fields = ['file_name']
+
+
+@admin.register(StreamBenchmark)
+class StreamBenchmarkAdmin(admin.ModelAdmin):
+    list_display = ['stream_name', 'updated_year', 'updated_at']
+    search_fields = ['stream_name', 'updated_year']
 
 
 @admin.register(Analysis)

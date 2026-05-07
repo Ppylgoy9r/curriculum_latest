@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Batch, Curriculum, Analysis
+from .models import Batch, Curriculum, StreamBenchmark, Analysis
 
 
 class BatchSerializer(serializers.ModelSerializer):
@@ -21,6 +21,17 @@ class CurriculumUploadSerializer(serializers.Serializer):
     batch_year = serializers.CharField(required=False, default='2025-2026')
 
 
+class StreamBenchmarkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StreamBenchmark
+        fields = [
+            'id', 'stream_name', 'benchmark_topics', 'required_tools',
+            'industry_skills', 'expected_outcomes', 'updated_year',
+            'source_urls', 'source_snapshot', 'source_status',
+            'fetched_at', 'expires_at', 'created_at', 'updated_at'
+        ]
+
+
 class AnalysisSerializer(serializers.ModelSerializer):
     class Meta:
         model = Analysis
@@ -35,5 +46,5 @@ class AnalysisSummarySerializer(serializers.ModelSerializer):
             'detected_topic', 'subtopics', 'whats_good', 'needs_improvement',
             'ai_suggestions', 'quick_fixes', 'category_scores', 'score_trend',
             'improvement_summary', 'previous_score', 'performance_change',
-            'categories_improved', 'categories_total', 'analyzed_at'
+            'categories_improved', 'categories_total', 'full_report', 'analyzed_at'
         ]

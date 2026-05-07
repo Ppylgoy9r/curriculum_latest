@@ -33,6 +33,29 @@ class Curriculum(models.Model):
         return self.file_name
 
 
+class StreamBenchmark(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stream_name = models.CharField(max_length=255, unique=True)
+    benchmark_topics = models.JSONField(default=list, blank=True)
+    required_tools = models.JSONField(default=list, blank=True)
+    industry_skills = models.JSONField(default=list, blank=True)
+    expected_outcomes = models.JSONField(default=list, blank=True)
+    updated_year = models.CharField(max_length=9, default='2025-2026')
+    source_urls = models.JSONField(default=list, blank=True)
+    source_snapshot = models.JSONField(default=dict, blank=True)
+    source_status = models.CharField(max_length=100, default='seeded')
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['stream_name']
+
+    def __str__(self):
+        return f"{self.stream_name} ({self.updated_year})"
+
+
 class Analysis(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     curriculum = models.ForeignKey(Curriculum, on_delete=models.CASCADE, related_name='analyses')
